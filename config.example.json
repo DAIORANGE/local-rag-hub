@@ -1,0 +1,14 @@
+{
+  "ServerPath": "llama.cpp\\llama-server.exe",
+  "EmbeddingPath": "models\\embedding\\your-embedding-model.gguf",
+  "RerankerPath": "models\\reranker\\your-reranker-model.gguf",
+  "EmbeddingId": "your-embedding-model",
+  "RerankerId": "your-reranker-model",
+  "EmbeddingPooling": "last",
+  "EmbeddingPort": 11435,
+  "RerankerPort": 11436,
+  "Context": 16384,
+  "EmbeddingParallel": 4,
+  "RerankerParallel": 8,
+  "GpuLayers": 99
+}

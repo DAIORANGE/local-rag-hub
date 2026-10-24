@@ -1,0 +1,27 @@
+Local RAG Hub v0.3.0 — Third-Party Notices
+==========================================
+
+本程序 (LocalRagHub.exe) 为独立编译的 .NET Framework 应用，发布包中
+不捆绑任何第三方 DLL、二进制或模型权重。
+
+运行期依赖（需用户自行获取，本包不包含、不分发）：
+
+1) .NET Framework 4.8 (Microsoft)
+   - 平台运行时，随 Windows 提供或由微软官方安装。
+   - 许可：Microsoft 软件许可条款。
+
+2) llama.cpp / llama-server.exe (ggml-org, MIT License)
+   - 本工具通过命令行调用用户自行安装的 llama-server.exe，不捆绑其二进制。
+   - 项目主页：https://github.com/ggml-org/llama.cpp
+   - 许可：MIT License。
+
+3) 模型权重 (GGUF)
+   - 例如 Qwen3-Embedding-8B / Qwen3-Reranker-8B 等，由用户自行获取并遵守
+     各模型自身的许可条款。本包不分发任何模型权重。
+
+4) NVIDIA nvidia-smi.exe
+   - 随 NVIDIA 显卡驱动安装，仅用于只读读取 GPU 指标。
+
+程序内使用的 .NET 类库（System.Windows.Forms / System.Drawing /
+System.Management / System.Web.Extensions / System.Core）均属
+.NET Framework 基础类库，随平台运行时提供。

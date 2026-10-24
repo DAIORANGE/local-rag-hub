@@ -1,0 +1,14 @@
+# Build files are in GitHub Releases, not the source tree
+*.exe
+*.zip
+*.pdb
+*.obj
+*.log
+config.json
+config.json.bak
+logs/
+models/
+llama.cpp/
+selftest-result.txt
+bin/
+obj/
