@@ -17,9 +17,9 @@ using System.Web.Script.Serialization;
 namespace LocalRagHub {
  public class HubConfig {
    public string ServerPath="", EmbeddingPath="", RerankerPath="", EmbeddingId="Qwen3-Embedding-8B", RerankerId="Qwen3-Reranker-8B", EmbeddingPooling="last";
-   public bool QueryEnabled=false;
-   public string QueryPath="", QueryId="Qwen3-4B-Instruct-2507";
-   public int QueryPort=11437, QueryContext=8192, QueryParallel=1, QueryGpuLayers=0;
+   public bool QueryEnabled=false, QueryDisableThinking=true;
+   public string QueryPath="", QueryId="Qwen3.5-9B";
+   public int QueryPort=11437, QueryContext=8192, QueryParallel=1, QueryGpuLayers=99;
    public int EmbeddingPort=11435, RerankerPort=11436, Context=16384, EmbeddingParallel=4, RerankerParallel=8, GpuLayers=99;
  }
  public class Unit {
@@ -48,7 +48,7 @@ namespace LocalRagHub {
       d.ServerPath=Pick(Path.Combine(AppDir,@"llama.cpp\llama-server.exe"),Path.Combine(root,@"llama.cpp\llama-server.exe"));
       d.EmbeddingPath=Pick(Path.Combine(AppDir,@"models\embedding\Qwen3-Embedding-8B-Q4_K_M.gguf"),Path.Combine(root,@"models\embedding\Qwen3-Embedding-8B-Q4_K_M.gguf"));
       d.RerankerPath=Pick(Path.Combine(AppDir,@"models\reranker\Qwen3-Reranker-8B-Q4_K_M.gguf"),Path.Combine(root,@"models\reranker\Qwen3-Reranker-8B-Q4_K_M.gguf"));
-      d.QueryPath=Pick(Path.Combine(AppDir,@"models\query\Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),Path.Combine(root,@"models\query\Qwen3-4B-Instruct-2507-Q4_K_M.gguf"));
+      d.QueryPath=Pick(Path.Combine(AppDir,@"models\query\Qwen_Qwen3.5-9B-Q5_K_M.gguf"),Path.Combine(root,@"models\query\Qwen_Qwen3.5-9B-Q5_K_M.gguf"));
       return d;
    }
    public static List<string> Missing(HubConfig c){
@@ -282,7 +282,10 @@ namespace LocalRagHub {
        args.Append("-m ").Append(Quote(unit.File)).Append(" ");
        if(unit.Role=="Embedding")args.Append("--embedding --pooling ").Append(c.EmbeddingPooling).Append(" ");
        else if(unit.Role=="Reranker")args.Append("--embedding --reranking --pooling rank ");
-       else args.Append("--jinja ");
+       else {
+          args.Append("--jinja ");
+          if(c.QueryDisableThinking)args.Append("--reasoning off --chat-template-kwargs ").Append(Quote("{\"enable_thinking\":false}")).Append(" ");
+        }
        args.Append("--host 127.0.0.1 --port ").Append(unit.Port);
        args.Append(" -c ").Append(unit.Role=="Query"?c.QueryContext:c.Context).Append(" -np ").Append(unit.Parallel);
        args.Append(" -ngl ").Append(unit.Role=="Query"?c.QueryGpuLayers:c.GpuLayers).Append(" -kvu --no-webui ");
@@ -472,7 +475,7 @@ namespace LocalRagHub {
 namespace LocalRagHub {
  public class QuerySettingsDialog:Form {
    public HubConfig Value;
-   CheckBox enabled; TextBox path,alias;
+   CheckBox enabled,disableThink; TextBox path,alias;
    NumericUpDown port,ctx,parallel,gpu;
    public QuerySettingsDialog(HubConfig c){
      Value=Paths.Clone(c);
@@ -492,12 +495,13 @@ namespace LocalRagHub {
      ctx=Num("上下文",Value.QueryContext,194,291,512,131072);
      parallel=Num("并行槽",Value.QueryParallel,362,291,1,32);
      gpu=Num("GPU Layers",Value.QueryGpuLayers,530,291,0,999);
-     Theme.Label(this,"GPU Layers=0 使用 CPU；小于 3 秒的目标需要实际测试。",26,378,646,30,9,Theme.Muted);
+     disableThink=new CheckBox{Text="禁用模型思考（支持的模型模板）",Checked=Value.QueryDisableThinking,Location=new Point(26,370),Size=new Size(620,29),ForeColor=Theme.Cyan,BackColor=Theme.Bg};Controls.Add(disableThink);
+     Theme.Label(this,"GPU Layers=0 使用 CPU；速度与显存需实际测试。",26,404,646,23,9,Theme.Muted);
      var cancel=new ActionButton("取消",358,442,147,42);var ok=new ActionButton("确定",516,442,158,42,true);
      Controls.Add(cancel);Controls.Add(ok);
      cancel.Click+=(s,e)=>{DialogResult=DialogResult.Cancel;Close();};
      ok.Click+=(s,e)=>{
-       Value.QueryEnabled=enabled.Checked;Value.QueryPath=path.Text.Trim();Value.QueryId=alias.Text.Trim();
+       Value.QueryEnabled=enabled.Checked;Value.QueryDisableThinking=disableThink.Checked;Value.QueryPath=path.Text.Trim();Value.QueryId=alias.Text.Trim();
        Value.QueryPort=(int)port.Value;Value.QueryContext=(int)ctx.Value;
        Value.QueryParallel=(int)parallel.Value;Value.QueryGpuLayers=(int)gpu.Value;
        DialogResult=DialogResult.OK;Close();
