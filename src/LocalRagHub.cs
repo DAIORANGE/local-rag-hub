@@ -368,7 +368,7 @@ namespace LocalRagHub {
    public static readonly Color Green=Color.FromArgb(38,234,160), Cyan=Color.FromArgb(98,210,226), Yellow=Color.FromArgb(255,197,84), Red=Color.FromArgb(252,106,107), Button=Color.FromArgb(34,59,76);
    public static Font Font(int size,bool bold=false){return new Font("Microsoft YaHei UI",size,bold?FontStyle.Bold:FontStyle.Regular);}
    public static Label Label(Control c,string txt,int x,int y,int w,int h,int size,Color color,bool bold=false){
-     var l=new Label{Text=txt,Location=new Point(x,y),Size=new Size(w,h),ForeColor=color,BackColor=Color.Transparent,Font=Font(size,bold),AutoEllipsis=true};
+     var l=new Label{Text=txt,Location=new Point(x,y),Size=new Size(w,h),ForeColor=color,BackColor=c.BackColor,Font=Font(size,bold),AutoEllipsis=true};
      c.Controls.Add(l);return l;
    }
    public static GraphicsPath Shape(Rectangle r,int rad){
@@ -386,6 +386,7 @@ namespace LocalRagHub {
      DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);
    }
    protected override void OnPaintBackground(PaintEventArgs e){
+     e.Graphics.Clear(Parent!=null?Parent.BackColor:Theme.Bg);
      e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
      using(var path=Theme.Shape(new Rectangle(1,1,Width-3,Height-3),Corner))
      using(var b=new SolidBrush(BackColor))e.Graphics.FillPath(b,path);
@@ -407,6 +408,7 @@ namespace LocalRagHub {
    protected override void OnMouseEnter(EventArgs e){hovering=true;Invalidate();base.OnMouseEnter(e);}
    protected override void OnMouseLeave(EventArgs e){hovering=false;Invalidate();base.OnMouseLeave(e);}
    protected override void OnPaint(PaintEventArgs e){
+     e.Graphics.Clear(Parent!=null?Parent.BackColor:Theme.Bg);
      e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
      Color basecolor=Primary?Color.FromArgb(10,139,101):(Destructive?Color.FromArgb(73,47,58):Theme.Button);
      if(hovering&&Enabled)basecolor=ControlPaint.Light(basecolor,.18f);
@@ -607,8 +609,8 @@ namespace LocalRagHub {
       settings=ButtonOn(top,"⚙  设置",1098,18,120,38,false);
        querySettings=ButtonOn(top,"◇ Query设置",947,18,140,38,false);
       var chip=new Card(682,67,535,85){Line=Theme.Green};top.Controls.Add(chip);
-      Theme.Label(chip,"●  服务总状态",22,12,238,25,11,Theme.Muted);
-      allstatus=Theme.Label(chip,"正在检查...",22,37,488,35,19,Theme.Green,true);
+      Theme.Label(chip,"●  服务总状态",22,9,310,22,10,Theme.Muted);
+      allstatus=Theme.Label(chip,"正在检查...",22,42,488,28,15,Theme.Green,true);
 
        var em=CardAt(23,204,400,220);em.Line=Theme.Cyan;
        var rr=CardAt(437,204,400,220);rr.Line=Theme.Cyan;
