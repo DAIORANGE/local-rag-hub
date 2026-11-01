@@ -12,3 +12,22 @@ llama.cpp/
 selftest-result.txt
 bin/
 obj/
+
+# Private machine runtime state (must never be uploaded)
+managed-model-processes.json*
+*.tmp
+*.bak
+config-backups/
+ui-rollback/
+
+# Synthetic / RP regression artefacts and local model telemetry
+tests/*-stage/
+tests/runtime/
+tests/shutdown-stage/
+tests/query-ab-*/
+tests/guard-invalid-config/
+tests/monitor-stage/
+tests/ui-paint-fix/
+tests/*.ps1
+tests/*.png
+tests/*.json
