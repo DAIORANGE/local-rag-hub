@@ -34,6 +34,7 @@ namespace LocalRagHub {
    public static readonly string ConfigFile=Path.Combine(AppDir,"config.json");
    public static readonly string LogDir=Path.Combine(AppDir,"logs");
    public static readonly string UiLog=Path.Combine(LogDir,"hub.log");
+   public static string ConfigReadError="";
    public static string Resolve(string path){
       if(String.IsNullOrWhiteSpace(path))return "";
       return Path.GetFullPath(Path.IsPathRooted(path)?path:Path.Combine(AppDir,path));
@@ -60,22 +61,29 @@ namespace LocalRagHub {
       return m;
    }
    public static HubConfig Read(){
+     ConfigReadError="";
+     if(!File.Exists(ConfigFile))return Defaults();
      try {
-       if(File.Exists(ConfigFile)){
-         var c=new JavaScriptSerializer().Deserialize<HubConfig>(File.ReadAllText(ConfigFile,Encoding.UTF8));
-         if(c!=null)return c;
-       }
-     } catch(Exception ex){File.AppendAllText(Path.Combine(AppDir,"config-error.log"),ex.Message+Environment.NewLine);}
-     return Defaults();
+       var c=new JavaScriptSerializer().Deserialize<HubConfig>(File.ReadAllText(ConfigFile,Encoding.UTF8));
+       if(c==null)throw new InvalidDataException("配置文件为空或无法解析");
+       return c;
+     } catch(Exception ex){
+       ConfigReadError="现有 config.json 无法读取，请先备份并修复，不会覆盖原文件："+ex.GetBaseException().Message;
+       Logger.Write("[config] "+ConfigReadError);
+       return Defaults();
+     }
    }
    public static HubConfig Clone(HubConfig c){return new JavaScriptSerializer().Deserialize<HubConfig>(new JavaScriptSerializer().Serialize(c));}
    public static void Save(HubConfig c){
+     if(!String.IsNullOrEmpty(ConfigReadError) && File.Exists(ConfigFile))
+       throw new InvalidOperationException("现有 config.json 解析失败，为防止覆盖用户配置，已拒绝保存。请先修复或移走损坏的配置，并保留备份。");
      Validate(c);
      var json=new JavaScriptSerializer().Serialize(c);
      var temp=ConfigFile+".tmp";
      File.WriteAllText(temp,json,Encoding.UTF8);
      if(File.Exists(ConfigFile)) File.Replace(temp,ConfigFile,ConfigFile+".bak",true);
      else File.Move(temp,ConfigFile);
+     ConfigReadError="";
    }
    public static void Validate(HubConfig c) {
      if(c.EmbeddingPort<1024||c.EmbeddingPort>65535||c.RerankerPort<1024||c.RerankerPort>65535||c.EmbeddingPort==c.RerankerPort)throw new Exception("两个服务须使用不同的有效端口 (1024-65535)");
@@ -161,12 +169,17 @@ namespace LocalRagHub {
        sb.AppendLine("Embedding: "+c.EmbeddingId+" port="+c.EmbeddingPort+" pooling="+c.EmbeddingPooling+" ["+(File.Exists(Paths.Resolve(c.EmbeddingPath))?"OK":"MISSING")+"]");
        sb.AppendLine("Reranker: "+c.RerankerId+" port="+c.RerankerPort+" ["+(File.Exists(Paths.Resolve(c.RerankerPath))?"OK":"MISSING")+"]");
         sb.AppendLine("Query: "+(c.QueryEnabled?"ENABLED":"DISABLED")+" model="+c.QueryId+" port="+c.QueryPort+" ctx="+c.QueryContext+" ngl="+c.QueryGpuLayers);
-       try{Paths.Validate(c);sb.AppendLine("ConfigValidation: PASS");}
-       catch(Exception ve){sb.AppendLine("ConfigValidation: NOT-READY ("+ve.Message+")");}
+       if(!String.IsNullOrEmpty(Paths.ConfigReadError)){
+         sb.AppendLine("ConfigRead: INVALID ("+Paths.ConfigReadError+")");code=3;
+       }else sb.AppendLine("ConfigRead: PASS");
+       if(String.IsNullOrEmpty(Paths.ConfigReadError)){
+         try{Paths.Validate(c);sb.AppendLine("ConfigValidation: PASS");}
+         catch(Exception ve){sb.AppendLine("ConfigValidation: NOT-READY ("+ve.Message+")");code=3;}
+       }else sb.AppendLine("ConfigValidation: NOT-READY (config.json cannot be read)");
        var miss=Paths.Missing(c);
        sb.AppendLine("Missing: "+(miss.Count==0?"none":string.Join(", ",miss.ToArray())));
      }catch(Exception ex){sb.AppendLine("ERROR: "+ex.GetBaseException().Message);code=2;}
-     sb.AppendLine("Result: SELFTEST_OK_NO_GUI");
+     sb.AppendLine(code==0?"Result: SELFTEST_OK_NO_GUI":"Result: SELFTEST_NOT_READY_NO_GUI");
      var report=sb.ToString();
      try{File.WriteAllText(Path.Combine(Paths.AppDir,"selftest-result.txt"),report,Encoding.UTF8);}catch{}
      try{Console.Out.Write(report);Console.Out.Flush();}catch{}
@@ -202,6 +215,30 @@ namespace LocalRagHub {
      }catch(Exception ex){Logger.Write("[monitor] netstat "+ex.Message);}
      return 0;
    }
+   // Fail closed: exact model path, alias, host and port must match this launcher.
+   // A filename merely contained in another argument does not prove ownership.
+   internal static bool MatchesLaunchCommand(string cmd,Unit unit){
+     if(String.IsNullOrWhiteSpace(cmd)||unit==null||String.IsNullOrWhiteSpace(unit.File)||String.IsNullOrWhiteSpace(unit.Alias))return false;
+     try{
+       string model=@"(?:^|\s)(?:-m|--model)\s+(?:""(?<q>[^""]+)""|(?<u>[^\s""]+))(?=\s|$)";
+       string alias=@"(?:^|\s)(?:-a|--alias)\s+(?:""(?<q>[^""]+)""|(?<u>[^\s""]+))(?=\s|$)";
+       string port=@"(?:^|\s)--port\s+(?<v>[0-9]{1,5})(?=\s|$)";
+       string host=@"(?:^|\s)--host\s+(?<v>[^\s""]+)(?=\s|$)";
+       var m=Regex.Matches(cmd,model,RegexOptions.IgnoreCase);
+       var a=Regex.Matches(cmd,alias,RegexOptions.IgnoreCase);
+       var p=Regex.Matches(cmd,port,RegexOptions.IgnoreCase);
+       var h=Regex.Matches(cmd,host,RegexOptions.IgnoreCase);
+       if(m.Count!=1||a.Count!=1||p.Count!=1||h.Count!=1)return false;
+       string path=m[0].Groups["q"].Success?m[0].Groups["q"].Value:m[0].Groups["u"].Value;
+       string modelAlias=a[0].Groups["q"].Success?a[0].Groups["q"].Value:a[0].Groups["u"].Value;
+       int actualPort;
+       return int.TryParse(p[0].Groups["v"].Value,out actualPort)
+         && actualPort==unit.Port
+         && String.Equals(h[0].Groups["v"].Value,"127.0.0.1",StringComparison.Ordinal)
+         && String.Equals(Path.GetFullPath(path),Path.GetFullPath(unit.File),StringComparison.OrdinalIgnoreCase)
+         && String.Equals(modelAlias,unit.Alias,StringComparison.Ordinal);
+     }catch{return false;}
+   }
    static bool Owned(int pid,Unit unit,HubConfig c){
      if(pid<=0)return false;
      try {
@@ -209,9 +246,7 @@ namespace LocalRagHub {
          foreach(ManagementObject o in search.Get()){
            string actual=Convert.ToString(o["ExecutablePath"]),cmd=Convert.ToString(o["CommandLine"]);
            return string.Equals(actual,Paths.Resolve(c.ServerPath),StringComparison.OrdinalIgnoreCase)
-                && cmd.IndexOf(unit.File,StringComparison.OrdinalIgnoreCase)>=0
-                && Regex.IsMatch(cmd,@"(?:--port|-p)\s+"+unit.Port+@"(?:\s|$)",RegexOptions.IgnoreCase)
-                && cmd.IndexOf("--host 127.0.0.1",StringComparison.OrdinalIgnoreCase)>=0;
+             && MatchesLaunchCommand(cmd,unit);
          }
        }
      }catch{}
@@ -535,7 +570,7 @@ namespace LocalRagHub {
       DrawUI();
       Shown+=(s,e)=>{
         bool freshRun=!File.Exists(Paths.ConfigFile);
-        var miss=Paths.Missing(cfg);configured=miss.Count==0;
+        var miss=Paths.Missing(cfg);configured=miss.Count==0 && String.IsNullOrEmpty(Paths.ConfigReadError);
         LoadHistory();
         Log("启动器已就绪。当前配置："+cfg.EmbeddingId+" / "+cfg.RerankerId+(cfg.QueryEnabled?" / "+cfg.QueryId:"（Query 已关闭）"));
         if(!configured){
@@ -543,7 +578,7 @@ namespace LocalRagHub {
           allstatus.Text="⚠ 尚未完成配置：请点击右上角「设置」选择 llama-server 与两个 GGUF";
           allstatus.ForeColor=Theme.Yellow;
         }
-        clock.Start();RefreshStatus();
+        ToggleActions(false);clock.Start();RefreshStatus();
         if(freshRun&&!configured){try{BeginInvoke((Action)(()=>OpenSettings()));}catch{}}
       };
       FormClosing+=(s,e)=>{
@@ -701,9 +736,15 @@ namespace LocalRagHub {
    void ToggleActions(bool busy) {
      go.Enabled=stop.Enabled=restart.Enabled=settings.Enabled=querySettings.Enabled=embStart.Enabled=embStop.Enabled=rerStart.Enabled=rerStop.Enabled=queryStart.Enabled=queryStop.Enabled=!busy;
       queryStart.Enabled=queryStop.Enabled=(!busy&&cfg.QueryEnabled);
+      if(!String.IsNullOrEmpty(Paths.ConfigReadError)){
+        go.Enabled=stop.Enabled=restart.Enabled=embStart.Enabled=embStop.Enabled=rerStart.Enabled=rerStop.Enabled=queryStart.Enabled=queryStop.Enabled=false;
+      }
      go.Text=busy?"⌛  后台操作中，窗口仍可监控":"▶   启动 / 恢复服务";
    }
    void DoAction(string kind,string role=null){
+     if(!String.IsNullOrEmpty(Paths.ConfigReadError)){
+       Log("配置文件无法解析：为避免按错误默认配置启动或停止服务，操作被拒绝。请备份并修复 config.json。");return;
+     }
      if(Interlocked.CompareExchange(ref working,1,0)!=0)return;
      ToggleActions(true);Log("开始："+kind+(role==null?"全部服务":role));
      var config=Paths.Clone(cfg);var units=Paths.Units(config).Where(u=>role==null||u.Role==role).ToArray();
@@ -747,9 +788,10 @@ namespace LocalRagHub {
        UpdateService(statuses[2],querystate,querypid,queryport,querytime,cfg.QueryPort);
        bool a=statuses[0].State=="READY",b=statuses[1].State=="READY",q=!cfg.QueryEnabled||statuses[2].State=="READY";
        bool all=a&&b&&q,any=a||b||(cfg.QueryEnabled&&statuses[2].State=="READY");
-       allstatus.Text=all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":statuses.Any(x=>x.State=="FOREIGN")?"⚠  端口已被其他进程占用":"○  服务已停止";
-       allstatus.ForeColor=all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
-       if(!configured){allstatus.Text="⚠ 尚未完成配置：请在「设置」中核对所需 GGUF（Query 为可选服务）";allstatus.ForeColor=Theme.Yellow;}
+       bool foreign=statuses.Any(x=>x.State=="FOREIGN");
+       allstatus.Text=foreign?"⚠  有端口被其他进程占用":all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":"○  服务已停止";
+       allstatus.ForeColor=foreign?Theme.Red:all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
+       if(!configured){allstatus.Text=String.IsNullOrEmpty(Paths.ConfigReadError)?"⚠ 缺少模型/配置文件，请检查设置":"⚠ 配置文件损坏，已锁定服务操作";allstatus.ForeColor=Theme.Yellow;}
      if(!String.IsNullOrEmpty(gpu)){
        var parts=gpu.Split('|');
        if(parts.Length>=7){
