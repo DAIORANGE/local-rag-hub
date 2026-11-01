@@ -8,14 +8,21 @@ class StatusUiSmoke {
  [STAThread] static int Main(){
    Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
    using(var app=new MainWindow()){
+     app.ShowInTaskbar=false;app.Opacity=0;app.StartPosition=FormStartPosition.Manual;app.Location=new Point(-32000,-32000);
      app.Show();Application.DoEvents();
      var top=app.Controls.OfType<Card>().Single(x=>x.Top==15&&x.Left==23);
      var statusCard=top.Controls.OfType<Card>().Single(x=>x.Left==682);
      var status=statusCard.Controls.OfType<StatusText>().Single();
+     var subtitle=top.Controls.OfType<Label>().Single(x=>x.Text.StartsWith("Embedding / Reranker"));
+     if(subtitle.Bounds.IntersectsWith(statusCard.Bounds))
+       throw new Exception("TOP_SUBTITLE_OVERLAPS_STATUS_CARD");
+     foreach(var element in top.Controls.OfType<Label>())
+       if(element.Bounds.IntersectsWith(statusCard.Bounds))
+         throw new Exception("TOP_LABEL_OVERLAPS_STATUS_CARD: "+element.Text);
      var title=statusCard.Controls.OfType<Label>().Single(x=>x.Text.Contains("服务总状态"));
      if(status.Bounds.IntersectsWith(title.Bounds))throw new Exception("HEADER_TEXT_OVERLAP");
      if(status.Top<30||status.Bottom>statusCard.ClientSize.Height)throw new Exception("STATUS_OUTSIDE_CARD");
-     status.Text="○  服务已停止";status.ForeColor=Theme.Green;status.Invalidate();status.Update();
+     status.Text="STOPPED · 模型服务已停止";status.ForeColor=Theme.Green;status.Invalidate();status.Update();
      using(var b=new Bitmap(statusCard.Width,statusCard.Height)){
        statusCard.DrawToBitmap(b,new Rectangle(0,0,b.Width,b.Height));
        b.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"status-after.png"));
