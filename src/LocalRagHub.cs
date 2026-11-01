@@ -688,7 +688,7 @@ namespace LocalRagHub {
       Theme.Label(top,"⬡",23,27,75,80,36,Theme.Cyan,true);
       Theme.Label(top,"Local RAG Hub",94,19,545,47,25,W,true);
       Theme.Label(top,"本地检索服务台 · 一键启动 · 实时监控",98,71,535,37,13,Theme.Muted);
-      Theme.Label(top,"Embedding / Reranker / Query Chat · 独立服务控制",98,115,660,28,10,Theme.Muted);
+      Theme.Label(top,"Embedding / Reranker / Query Chat · 独立服务控制",98,115,540,28,10,Theme.Muted);
       settings=ButtonOn(top,"⚙  设置",1098,18,120,38,false);
        querySettings=ButtonOn(top,"◇ Query设置",947,18,140,38,false);
       var chip=new Card(682,67,535,85){Line=Theme.Green};top.Controls.Add(chip);
