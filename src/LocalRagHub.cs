@@ -527,7 +527,7 @@ namespace LocalRagHub {
    public MainWindow(){
       cfg=Paths.Read();
       Text="Local RAG Hub · 本地检索服务台";
-      ClientSize=new Size(1290,919);StartPosition=FormStartPosition.CenterScreen;
+      ClientSize=new Size(1290,965);StartPosition=FormStartPosition.CenterScreen;
       BackColor=Theme.Bg; ForeColor=Color.White;Font=Theme.Font(10);
       AutoScaleMode=AutoScaleMode.None;
       FormBorderStyle=FormBorderStyle.FixedSingle;MaximizeBox=false;DoubleBuffered=true;
@@ -569,9 +569,9 @@ namespace LocalRagHub {
       Theme.Label(chip,"●  服务总状态",22,12,238,25,11,Theme.Muted);
       allstatus=Theme.Label(chip,"正在检查...",22,37,488,35,19,Theme.Green,true);
 
-       var em=CardAt(23,204,400,185);em.Line=Theme.Cyan;
-       var rr=CardAt(437,204,400,185);rr.Line=Theme.Cyan;
-       var qr=CardAt(851,204,415,185);qr.Line=Theme.Cyan;
+       var em=CardAt(23,204,400,220);em.Line=Theme.Cyan;
+       var rr=CardAt(437,204,400,220);rr.Line=Theme.Cyan;
+       var qr=CardAt(851,204,415,220);qr.Line=Theme.Cyan;
        Theme.Label(em,"◈  Embedding",21,18,255,36,15,W,true);
        Theme.Label(rr,"◉  Reranker",21,18,255,36,15,W,true);
        Theme.Label(qr,"◇  Query Chat",21,18,255,36,15,W,true);
@@ -584,11 +584,11 @@ namespace LocalRagHub {
        embpid=Theme.Label(em,"--",20,113,123,45,13,W,true);embport=Theme.Label(em,"--",148,113,123,45,13,W,true);embtime=Theme.Label(em,"--",276,113,123,45,13,W,true);
        rerpid=Theme.Label(rr,"--",20,113,123,45,13,W,true);rerport=Theme.Label(rr,"--",148,113,123,45,13,W,true);rertime=Theme.Label(rr,"--",276,113,123,45,13,W,true);
        querypid=Theme.Label(qr,"--",20,113,123,45,13,W,true);queryport=Theme.Label(qr,"--",148,113,123,45,13,W,true);querytime=Theme.Label(qr,"--",276,113,123,45,13,W,true);
-       embStart=ButtonOn(em,"▶ 启动",20,153,170,27,true);embStop=ButtonOn(em,"■ 停止",209,153,170,27);
-       rerStart=ButtonOn(rr,"▶ 启动",20,153,170,27,true);rerStop=ButtonOn(rr,"■ 停止",209,153,170,27);
-       queryStart=ButtonOn(qr,"▶ 启动",20,153,170,27,true);queryStop=ButtonOn(qr,"■ 停止",209,153,170,27);
+       embStart=ButtonOn(em,"▶ 启动",20,171,170,36,true);embStop=ButtonOn(em,"■ 停止",209,171,170,36);
+       rerStart=ButtonOn(rr,"▶ 启动",20,171,170,36,true);rerStop=ButtonOn(rr,"■ 停止",209,171,170,36);
+       queryStart=ButtonOn(qr,"▶ 启动",20,171,170,36,true);queryStop=ButtonOn(qr,"■ 停止",209,171,170,36);
 
-       var gpu=CardAt(23,407,1243,178);
+       var gpu=CardAt(23,442,1243,178);
       Theme.Label(gpu,"▥  GPU 资源监控",22,16,410,37,16,W,true);
       gpuname=Theme.Label(gpu,"NVIDIA GPU",860,18,360,31,12,Theme.Cyan,true);
       Theme.Label(gpu,"显存使用",27,68,165,24,11,Theme.Muted);
@@ -604,24 +604,24 @@ namespace LocalRagHub {
       Theme.Label(gpu,"功率",1083,68,130,24,11,Theme.Muted);
       power=Theme.Label(gpu,"—",1083,100,135,40,16,W,true);
 
-      var logcard=CardAt(23,603,749,251);
+      var logcard=CardAt(23,638,749,251);
       Theme.Label(logcard,"▤  运行日志",19,12,412,36,16,W,true);
       var area=new Card(14,51,721,184){Line=Theme.Edge,BackColor=Color.FromArgb(9,23,33)};
       logcard.Controls.Add(area);
       logView=new RichTextBox{Location=new Point(11,9),Size=new Size(699,165),BackColor=Color.FromArgb(9,23,33),
         ForeColor=Theme.Muted,Font=new Font("Consolas",10),BorderStyle=BorderStyle.None,ReadOnly=true,WordWrap=false,DetectUrls=false};
       area.Controls.Add(logView);
-      var action=CardAt(791,603,475,251);
+      var action=CardAt(791,638,475,251);
       Theme.Label(action,"▷  服务控制",20,12,429,36,16,W,true);
       go=ButtonOn(action,"▶   启动 / 恢复服务",17,51,438,56,true);
       stop=ButtonOn(action,"■   停止服务",17,118,213,45,false);stop.Destructive=true;
       restart=ButtonOn(action,"↻   重新启动",240,118,215,45,false);
       copy=ButtonOn(action,"▣   一键复制酒馆 Agent 配置",17,177,438,52,true);
 
-      viewlogs=ButtonOn(this,"查看日志",24,868,154,34);
-      models=ButtonOn(this,"打开模型目录",190,868,181,34);
-      Theme.Label(this,"◈  仅本机 127.0.0.1    ·    按需加载    ·    不会开机自启",398,872,630,26,9,Theme.Muted);
-      refresh=Theme.Label(this,"正在连接...",1054,872,216,28,9,Theme.Cyan);
+      viewlogs=ButtonOn(this,"查看日志",24,903,154,34);
+      models=ButtonOn(this,"打开模型目录",190,903,181,34);
+      Theme.Label(this,"◈  仅本机 127.0.0.1    ·    按需加载    ·    不会开机自启",398,907,630,26,9,Theme.Muted);
+      refresh=Theme.Label(this,"正在连接...",1054,907,216,28,9,Theme.Cyan);
 
       settings.Click+=(s,e)=>OpenSettings();
        querySettings.Click+=(s,e)=>OpenQuerySettings();
