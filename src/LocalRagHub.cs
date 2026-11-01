@@ -424,7 +424,10 @@ namespace LocalRagHub {
       Theme.Label(this,"配置保存到程序目录 config.json，不修改 TT 酒馆、奶龙或狐忆。",28,624,560,24,9,Theme.Muted);
       var save=new ActionButton("保存配置",662,644,236,36,true);
       var cancel=new ActionButton("取消",502,644,140,36);
+       var queryButton=new ActionButton("Query 重写设置（可选）",28,644,245,36);
       Controls.Add(save);Controls.Add(cancel);
+       Controls.Add(queryButton);
+       queryButton.Click+=(s,e)=>{using(var d=new QuerySettingsDialog(Value)){if(d.ShowDialog(this)==DialogResult.OK)Value=Paths.Clone(d.Value);}};
       cancel.Click+=(s,e)=>{DialogResult=DialogResult.Cancel;Close();};
       save.Click+=(s,e)=>{
         try{
@@ -464,6 +467,48 @@ namespace LocalRagHub {
       main.Controls.Add(n);return n;
     }
   }
+}
+
+namespace LocalRagHub {
+ public class QuerySettingsDialog:Form {
+   public HubConfig Value;
+   CheckBox enabled; TextBox path,alias;
+   NumericUpDown port,ctx,parallel,gpu;
+   public QuerySettingsDialog(HubConfig c){
+     Value=Paths.Clone(c);
+     Text="Local RAG Hub · Query 重写";ClientSize=new Size(700,510);
+     BackColor=Theme.Bg;ForeColor=Color.White;Font=Theme.Font(10);
+     StartPosition=FormStartPosition.CenterParent;FormBorderStyle=FormBorderStyle.FixedDialog;MaximizeBox=false;MinimizeBox=false;
+     Theme.Label(this,"Query Chat 模型（可选第三服务）",24,12,650,38,18,Color.White,true);
+     Theme.Label(this,"默认关闭；不下载 GGUF，不修改前两个服务或向量索引。",24,54,650,30,10,Theme.Muted);
+     enabled=new CheckBox{Text="启用 Query 重写服务",Checked=Value.QueryEnabled,Location=new Point(26,97),Size=new Size(420,28),ForeColor=Theme.Green,BackColor=Theme.Bg};Controls.Add(enabled);
+     Theme.Label(this,"Chat GGUF 文件",26,141,210,24,10,Theme.Muted);
+     path=new TextBox{Text=Value.QueryPath,Location=new Point(26,168),Size=new Size(584,29),BackColor=Theme.Card,ForeColor=Color.White};Controls.Add(path);
+     var browse=new ActionButton("…",615,167,58,32);Controls.Add(browse);
+     browse.Click+=(s,e)=>{using(var d=new OpenFileDialog{Filter="GGUF 模型 (*.gguf)|*.gguf",CheckFileExists=true}){if(d.ShowDialog(this)==DialogResult.OK)path.Text=d.FileName;}};
+     Theme.Label(this,"模型 ID（/v1/models 和 Chat Completions）",26,214,632,24,10,Theme.Muted);
+     alias=new TextBox{Text=Value.QueryId,Location=new Point(26,243),Size=new Size(647,30),BackColor=Theme.Card,ForeColor=Color.White};Controls.Add(alias);
+     port=Num("端口",Value.QueryPort,26,291,1024,65535);
+     ctx=Num("上下文",Value.QueryContext,194,291,512,131072);
+     parallel=Num("并行槽",Value.QueryParallel,362,291,1,32);
+     gpu=Num("GPU Layers",Value.QueryGpuLayers,530,291,0,999);
+     Theme.Label(this,"GPU Layers=0 使用 CPU；小于 3 秒的目标需要实际测试。",26,378,646,30,9,Theme.Muted);
+     var cancel=new ActionButton("取消",358,442,147,42);var ok=new ActionButton("确定",516,442,158,42,true);
+     Controls.Add(cancel);Controls.Add(ok);
+     cancel.Click+=(s,e)=>{DialogResult=DialogResult.Cancel;Close();};
+     ok.Click+=(s,e)=>{
+       Value.QueryEnabled=enabled.Checked;Value.QueryPath=path.Text.Trim();Value.QueryId=alias.Text.Trim();
+       Value.QueryPort=(int)port.Value;Value.QueryContext=(int)ctx.Value;
+       Value.QueryParallel=(int)parallel.Value;Value.QueryGpuLayers=(int)gpu.Value;
+       DialogResult=DialogResult.OK;Close();
+     };
+   }
+   NumericUpDown Num(string name,int value,int x,int y,int min,int max){
+     Theme.Label(this,name,x,y,160,22,9,Theme.Muted);
+     var n=new NumericUpDown{Minimum=min,Maximum=max,Value=Math.Max(min,Math.Min(max,value)),Location=new Point(x,y+26),Size=new Size(148,28),BackColor=Theme.Card,ForeColor=Color.White};
+     Controls.Add(n);return n;
+   }
+ }
 }
 
 namespace LocalRagHub {
