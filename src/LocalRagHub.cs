@@ -513,10 +513,10 @@ namespace LocalRagHub {
 
 namespace LocalRagHub {
  public class MainWindow:Form {
-    HubConfig cfg;UnitStatus[] current={new UnitStatus(),new UnitStatus()};
+    HubConfig cfg;UnitStatus[] current={new UnitStatus(),new UnitStatus(),new UnitStatus{State="DISABLED"}};
     bool configured=true;
    readonly Color W=Color.White;
-   Label allstatus,embstate,rerstate,embpid,rerpid,embtime,rertime,embport,rerport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
+    Label allstatus,embstate,rerstate,querystate,embpid,rerpid,querypid,embtime,rertime,querytime,embport,rerport,queryport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
    Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,viewlogs,models;
    System.Windows.Forms.Timer clock;int poll=0,working=0;
    public MainWindow(){
@@ -532,7 +532,7 @@ namespace LocalRagHub {
         bool freshRun=!File.Exists(Paths.ConfigFile);
         var miss=Paths.Missing(cfg);configured=miss.Count==0;
         LoadHistory();
-        Log("启动器已就绪。当前配置："+cfg.EmbeddingId+" / "+cfg.RerankerId);
+        Log("启动器已就绪。当前配置："+cfg.EmbeddingId+" / "+cfg.RerankerId+(cfg.QueryEnabled?" / "+cfg.QueryId:"（Query 已关闭）"));
         if(!configured){
           Log("尚未完成配置，缺少："+string.Join("、",miss.ToArray()));
           allstatus.Text="⚠ 尚未完成配置：请点击右上角「设置」选择 llama-server 与两个 GGUF";
@@ -563,21 +563,23 @@ namespace LocalRagHub {
       Theme.Label(chip,"●  服务总状态",22,12,238,25,11,Theme.Muted);
       allstatus=Theme.Label(chip,"正在检查...",22,37,488,35,19,Theme.Green,true);
 
-      var em=CardAt(23,204,610,185);em.Line=Theme.Cyan;
-      var rr=CardAt(653,204,613,185);rr.Line=Theme.Cyan;
-      Theme.Label(em,"◈  Embedding 服务",23,18,412,36,17,W,true);
-      Theme.Label(rr,"◉  Reranker 服务",23,18,412,36,17,W,true);
-      embstate=Theme.Label(em,"检查中...",469,19,122,33,13,Theme.Yellow,true);
-      rerstate=Theme.Label(rr,"检查中...",472,19,120,33,13,Theme.Yellow,true);
-      for(int i=0;i<3;i++){
-        int x=25+i*189;
-        Theme.Label(em,i==0?"PID":i==1?"监听端口":"运行时长",x,85,178,24,10,Theme.Muted);
-        Theme.Label(rr,i==0?"PID":i==1?"监听端口":"运行时长",x,85,178,24,10,Theme.Muted);
-      }
-      embpid=Theme.Label(em,"--",25,113,185,45,15,W,true);embport=Theme.Label(em,"--",214,113,185,45,15,W,true);embtime=Theme.Label(em,"--",403,113,185,45,15,W,true);
-      rerpid=Theme.Label(rr,"--",25,113,185,45,15,W,true);rerport=Theme.Label(rr,"--",214,113,185,45,15,W,true);rertime=Theme.Label(rr,"--",403,113,185,45,15,W,true);
+       var em=CardAt(23,204,400,185);em.Line=Theme.Cyan;
+       var rr=CardAt(437,204,400,185);rr.Line=Theme.Cyan;
+       var qr=CardAt(851,204,415,185);qr.Line=Theme.Cyan;
+       Theme.Label(em,"◈  Embedding",21,18,255,36,15,W,true);
+       Theme.Label(rr,"◉  Reranker",21,18,255,36,15,W,true);
+       Theme.Label(qr,"◇  Query Chat",21,18,255,36,15,W,true);
+       embstate=Theme.Label(em,"检查中...",279,19,110,33,12,Theme.Yellow,true);
+       rerstate=Theme.Label(rr,"检查中...",279,19,110,33,12,Theme.Yellow,true);
+       querystate=Theme.Label(qr,"DISABLED",291,19,110,33,12,Theme.Muted,true);
+       foreach(var card in new Control[]{em,rr,qr}){
+         for(int i=0;i<3;i++)Theme.Label(card,i==0?"PID":i==1?"监听端口":"运行时长",20+i*128,85,123,24,10,Theme.Muted);
+       }
+       embpid=Theme.Label(em,"--",20,113,123,45,13,W,true);embport=Theme.Label(em,"--",148,113,123,45,13,W,true);embtime=Theme.Label(em,"--",276,113,123,45,13,W,true);
+       rerpid=Theme.Label(rr,"--",20,113,123,45,13,W,true);rerport=Theme.Label(rr,"--",148,113,123,45,13,W,true);rertime=Theme.Label(rr,"--",276,113,123,45,13,W,true);
+       querypid=Theme.Label(qr,"--",20,113,123,45,13,W,true);queryport=Theme.Label(qr,"--",148,113,123,45,13,W,true);querytime=Theme.Label(qr,"--",276,113,123,45,13,W,true);
 
-      var gpu=CardAt(23,407,1243,178);
+       var gpu=CardAt(23,407,1243,178);
       Theme.Label(gpu,"▥  GPU 资源监控",22,16,410,37,16,W,true);
       gpuname=Theme.Label(gpu,"NVIDIA GPU",860,18,360,31,12,Theme.Cyan,true);
       Theme.Label(gpu,"显存使用",27,68,165,24,11,Theme.Muted);
@@ -695,9 +697,9 @@ namespace LocalRagHub {
        string g="";
        try {
          var units=Paths.Units(config);
-         v=new[]{Backend.Check(units[0],config),Backend.Check(units[1],config)};
+          v=new[]{Backend.Check(units[0],config),Backend.Check(units[1],config),config.QueryEnabled?Backend.Check(units[2],config):new UnitStatus{State="DISABLED"}};
          g=Backend.Gpu();
-       } catch(Exception ex){Log("后台监控异常："+ex.Message);v=new[]{new UnitStatus(),new UnitStatus()};}
+        } catch(Exception ex){Log("后台监控异常："+ex.Message);v=new[]{new UnitStatus(),new UnitStatus(),new UnitStatus{State="DISABLED"}};}
        try{
          if(!IsDisposed)BeginInvoke((Action)(()=>DrawData(v,g)));
        }catch{}
@@ -708,10 +710,11 @@ namespace LocalRagHub {
      current=statuses;
      UpdateService(statuses[0],embstate,embpid,embport,embtime,cfg.EmbeddingPort);
      UpdateService(statuses[1],rerstate,rerpid,rerport,rertime,cfg.RerankerPort);
-      bool a=statuses[0].State=="READY",b=statuses[1].State=="READY";
-      allstatus.Text=a&&b?"✔  运行正常 · 两个服务 READY":a||b?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":statuses.Any(x=>x.State=="FOREIGN")?"⚠  端口已被其他进程占用":"○  服务已停止";
-      allstatus.ForeColor=a&&b?Theme.Green:(a||b?Theme.Yellow:Theme.Muted);
-      if(!configured){allstatus.Text="⚠ 尚未完成配置：请点击右上角「设置」选择 llama-server 与两个 GGUF";allstatus.ForeColor=Theme.Yellow;}
+       UpdateService(statuses[2],querystate,querypid,queryport,querytime,cfg.QueryPort);
+       bool a=statuses[0].State=="READY",b=statuses[1].State=="READY",q=!cfg.QueryEnabled||statuses[2].State=="READY";
+       bool all=a&&b&&q,any=a||b||(cfg.QueryEnabled&&statuses[2].State=="READY");
+       allstatus.Text=all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":statuses.Any(x=>x.State=="FOREIGN")?"⚠  端口已被其他进程占用":"○  服务已停止";
+       allstatus.ForeColor=all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
      if(!String.IsNullOrEmpty(gpu)){
        var parts=gpu.Split('|');
        if(parts.Length>=7){
@@ -730,7 +733,7 @@ namespace LocalRagHub {
    }
    void UpdateService(UnitStatus s,Label state,Label pid,Label port,Label span,int actualPort){
      state.Text=s.State;
-     state.ForeColor=s.State=="READY"?Theme.Green:s.State=="STOPPED"?Theme.Yellow:Theme.Red;
+      state.ForeColor=s.State=="READY"?Theme.Green:s.State=="DISABLED"?Theme.Muted:s.State=="STOPPED"?Theme.Yellow:Theme.Red;
      pid.Text=s.Pid>0?s.Pid.ToString():"—";
      port.Text=actualPort.ToString();
      if(s.Since> DateTime.MinValue){
