@@ -42,14 +42,14 @@
 
 此功能目前只在 `feature/query-rewrite-service-20261102` 上验证，尚未作为正式版发布。默认 **QueryEnabled=false**，原有 Embedding/Reranker 端口 11435 / 11436 与旧配置保持不变。
 
-在设置里进入「Query 重写设置（可选）」，选择兼容 llama.cpp 的 **Chat GGUF** 并启用，可单独设置模型 ID、端口、上下文长度、并行数与 GPU Layers。初始示例：`Qwen3-4B-Instruct-2507`、端口 `11437`、上下文 `8192`、并行 `1`、GPU Layers `0`（CPU）。**模型权重不会自动下载**。用户提供的 `Qwen3-8B-Instruct-2507` 名称没有在官方 2507 8B 型号中核实，不应作为默认下载目标。
+主界面三个服务卡分别提供「启动 / 停止」按钮，且右上角「Query设置」可在另外两个模型运行时独立保存 Query 配置。也可在主设置中进入「Query 重写设置（可选）」，选择兼容 llama.cpp 的 **Chat GGUF** 并启用，可单独设置模型 ID、端口、上下文长度、并行数与 GPU Layers。初始示例：`Qwen3.5-9B`（Q5_K_M）、端口 `11437`、上下文 `8192`、并行 `1`、GPU Layers `99`，默认尝试关闭思考。4B 为 A/B 对照，也可选择其他受 llama.cpp 支持的 Chat GGUF。
 
 - Chat Endpoint：`http://127.0.0.1:11437/v1/chat/completions`
 - 模型清单：`http://127.0.0.1:11437/v1/models`（应返回设置的模型别名）
 - 流式：客户端可使用 `stream:false`，`max_tokens:1024`。
 - 客户端附带 `enable_thinking:false` 时，本程序不解析它；兼容性以具体 llama.cpp 版本实测为准。
 - 启用第三服务后，启动 / 恢复 / 停止 / 重启会遍历三个服务，端口已被其他进程占用仍显示 FOREIGN 且不会结束非本应用进程。
-- 只读连接测试、真实模型加载及 2,000～4,000 token 输入的小于 3 秒目标尚未现场验证。第三个模型的权重、KV 缓存与运行时开销必须依据实际显存检测决定 GPU/CPU 卸载比例，不能预先承诺三模型全驻显存。
+- 真实 Chat 推理及 3,000 token 输入的性能验收尚未执行。关闭思考由 `--reasoning off` 和 `--chat-template-kwargs` 实施，并需在实际模型上验证结果。第三个模型的权重、KV 缓存与运行时开销必须依据实际显存检测决定 GPU/CPU 卸载比例，不能预先承诺三模型全驻显存。
 - 更换已有两个模型、重建索引及向 TT / SillyTavern 写入配置均 **不在本功能更新内**。
 
 ## 4. 在酒馆中怎么填？
