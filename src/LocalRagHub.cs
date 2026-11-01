@@ -521,7 +521,8 @@ namespace LocalRagHub {
     bool configured=true;
    readonly Color W=Color.White;
     Label allstatus,embstate,rerstate,querystate,embpid,rerpid,querypid,embtime,rertime,querytime,embport,rerport,queryport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
-   Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,viewlogs,models;
+   Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,querySettings,viewlogs,models;
+    ActionButton embStart,embStop,rerStart,rerStop,queryStart,queryStop;
    System.Windows.Forms.Timer clock;int poll=0,working=0;
    public MainWindow(){
       cfg=Paths.Read();
@@ -561,8 +562,9 @@ namespace LocalRagHub {
       Theme.Label(top,"⬡",23,27,75,80,36,Theme.Cyan,true);
       Theme.Label(top,"Local RAG Hub",94,19,545,47,25,W,true);
       Theme.Label(top,"本地检索服务台 · 一键启动 · 实时监控",98,71,535,37,13,Theme.Muted);
-      Theme.Label(top,"支持自定义 Embedding / Reranker · 无需绑定 TT 酒馆",98,115,660,28,10,Theme.Muted);
+      Theme.Label(top,"Embedding / Reranker / Query Chat · 独立服务控制",98,115,660,28,10,Theme.Muted);
       settings=ButtonOn(top,"⚙  设置",1098,18,120,38,false);
+       querySettings=ButtonOn(top,"◇ Query设置",947,18,140,38,false);
       var chip=new Card(682,67,535,85){Line=Theme.Green};top.Controls.Add(chip);
       Theme.Label(chip,"●  服务总状态",22,12,238,25,11,Theme.Muted);
       allstatus=Theme.Label(chip,"正在检查...",22,37,488,35,19,Theme.Green,true);
@@ -582,6 +584,9 @@ namespace LocalRagHub {
        embpid=Theme.Label(em,"--",20,113,123,45,13,W,true);embport=Theme.Label(em,"--",148,113,123,45,13,W,true);embtime=Theme.Label(em,"--",276,113,123,45,13,W,true);
        rerpid=Theme.Label(rr,"--",20,113,123,45,13,W,true);rerport=Theme.Label(rr,"--",148,113,123,45,13,W,true);rertime=Theme.Label(rr,"--",276,113,123,45,13,W,true);
        querypid=Theme.Label(qr,"--",20,113,123,45,13,W,true);queryport=Theme.Label(qr,"--",148,113,123,45,13,W,true);querytime=Theme.Label(qr,"--",276,113,123,45,13,W,true);
+       embStart=ButtonOn(em,"▶ 启动",20,153,170,27,true);embStop=ButtonOn(em,"■ 停止",209,153,170,27);
+       rerStart=ButtonOn(rr,"▶ 启动",20,153,170,27,true);rerStop=ButtonOn(rr,"■ 停止",209,153,170,27);
+       queryStart=ButtonOn(qr,"▶ 启动",20,153,170,27,true);queryStop=ButtonOn(qr,"■ 停止",209,153,170,27);
 
        var gpu=CardAt(23,407,1243,178);
       Theme.Label(gpu,"▥  GPU 资源监控",22,16,410,37,16,W,true);
@@ -619,6 +624,13 @@ namespace LocalRagHub {
       refresh=Theme.Label(this,"正在连接...",1054,872,216,28,9,Theme.Cyan);
 
       settings.Click+=(s,e)=>OpenSettings();
+       querySettings.Click+=(s,e)=>OpenQuerySettings();
+       embStart.Click+=(s,e)=>DoAction("启动","Embedding");
+       embStop.Click+=(s,e)=>DoAction("停止","Embedding");
+       rerStart.Click+=(s,e)=>DoAction("启动","Reranker");
+       rerStop.Click+=(s,e)=>DoAction("停止","Reranker");
+       queryStart.Click+=(s,e)=>DoAction("启动","Query");
+       queryStop.Click+=(s,e)=>DoAction("停止","Query");
       go.Click+=(s,e)=>DoAction("启动");
       stop.Click+=(s,e)=>DoAction("停止");
       restart.Click+=(s,e)=>DoAction("重启");
@@ -626,6 +638,7 @@ namespace LocalRagHub {
       viewlogs.Click+=(s,e)=>OpenFolder(Paths.LogDir);
       models.Click+=(s,e)=>OpenFolder(Path.GetDirectoryName(Paths.Resolve(cfg.EmbeddingPath)));
       clock=new System.Windows.Forms.Timer{Interval=5000};clock.Tick+=(s,e)=>RefreshStatus();
+       queryStart.Enabled=queryStop.Enabled=cfg.QueryEnabled;
    }
    void LoadHistory(){
      try {
@@ -666,18 +679,35 @@ namespace LocalRagHub {
         }
       }
    }
+   void OpenQuerySettings(){
+      if(Interlocked.CompareExchange(ref working,0,0)>0){MessageBox.Show(this,"先完成当前服务操作。");return;}
+      if(current.Length>2 && (current[2].State=="READY"||current[2].State=="LOADING")){
+        MessageBox.Show(this,"先停止 Query 服务即可更改它的模型；Embedding/Reranker 无需停止。","仅需停止 Query");return;
+      }
+      using(var d=new QuerySettingsDialog(cfg)){
+        if(d.ShowDialog(this)!=DialogResult.OK)return;
+        try{
+          Paths.Validate(d.Value);Paths.Save(d.Value);
+          cfg=Paths.Clone(d.Value);configured=Paths.Missing(cfg).Count==0;
+          Log("Query 配置已保存；QueryEnabled="+cfg.QueryEnabled+"；不会自动启动模型。");RefreshStatus();
+          ToggleActions(false);
+        }catch(Exception ex){MessageBox.Show(this,ex.Message,"Query 配置尚未保存",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+      }
+   }
    void CopyAgent(){
      try {Clipboard.SetText(ConfigText.Build(cfg));Log("已复制酒馆本地 Agent 配置（使用当前设置）");refresh.Text="✔ 已复制配置";}
      catch(Exception ex){MessageBox.Show(this,"无法写入剪贴板："+ex.Message);}
    }
    void ToggleActions(bool busy) {
-     go.Enabled=stop.Enabled=restart.Enabled=settings.Enabled=!busy;
+     go.Enabled=stop.Enabled=restart.Enabled=settings.Enabled=querySettings.Enabled=embStart.Enabled=embStop.Enabled=rerStart.Enabled=rerStop.Enabled=queryStart.Enabled=queryStop.Enabled=!busy;
+      queryStart.Enabled=queryStop.Enabled=(!busy&&cfg.QueryEnabled);
      go.Text=busy?"⌛  后台操作中，窗口仍可监控":"▶   启动 / 恢复服务";
    }
-   void DoAction(string kind){
+   void DoAction(string kind,string role=null){
      if(Interlocked.CompareExchange(ref working,1,0)!=0)return;
-     ToggleActions(true);Log("开始："+kind);
-     var config=Paths.Clone(cfg);var units=Paths.Units(config);
+     ToggleActions(true);Log("开始："+kind+(role==null?"全部服务":role));
+     var config=Paths.Clone(cfg);var units=Paths.Units(config).Where(u=>role==null||u.Role==role).ToArray();
+      if(units.Length==0){Log("["+role+"] 未启用，先在 Query 设置中启用。");Interlocked.Exchange(ref working,0);ToggleActions(false);return;}
      Task.Run(()=>{
        foreach(var u in units){
          try {
