@@ -127,7 +127,8 @@ namespace LocalRagHub {
      "Reranker 完整 Endpoint：http://127.0.0.1:"+c.RerankerPort+"/v1/rerank\r\n"+
      "模型权重："+Paths.Resolve(c.RerankerPath)+"\r\n\r\n"+
      "程序文件："+Paths.Resolve(c.ServerPath)+"\r\n"+
-     "两服务默认只监听 127.0.0.1，当前启动器不设 API Key；插件如强制要求填写，可用非真实的占位字符串 local-rag。\r\n"+
+      "启用的服务仅监听 127.0.0.1，启动器不设 API Key；可使用 local-rag 占位字符串。\r\n"+
+      (c.QueryEnabled?"Query Chat 模型："+c.QueryId+"\r\nQuery Endpoint：http://127.0.0.1:"+c.QueryPort+"/v1/chat/completions\r\nQuery 模型列表：http://127.0.0.1:"+c.QueryPort+"/v1/models\r\n用于检索前 Query 重写，stream:false；不会自动修改外部插件。\r\n":"")+
      "运行检查：http://127.0.0.1:"+c.EmbeddingPort+"/health 和 http://127.0.0.1:"+c.RerankerPort+"/health\r\n"+
      "奶龙(龙血玄黄/shujuku)支持完整 Endpoint 格式；狐忆与其他记忆插件须根据其自身接口契约核验。\r\n"+
      "重要：更换 Embedding 模型、量化方式或维度后旧向量索引不能假定兼容！生产数据先备份、隔离验证、按插件流程重建索引；未经用户授权不可自行修改世界书、聊天和正式数据库。\r\n"+
@@ -234,12 +235,32 @@ namespace LocalRagHub {
        }
      }catch{return false;}
    }
+   static bool HasChatModel(int port,string alias){
+      try{
+        var req=(HttpWebRequest)WebRequest.Create("http://127.0.0.1:"+port+"/v1/models");
+        req.Timeout=1200;req.ReadWriteTimeout=1200;req.Proxy=null;
+        using(var resp=(HttpWebResponse)req.GetResponse())
+        using(var sr=new StreamReader(resp.GetResponseStream())){
+          if((int)resp.StatusCode!=200)return false;
+          var json=new JavaScriptSerializer().DeserializeObject(sr.ReadToEnd()) as Dictionary<string,object>;
+          if(json==null||!json.ContainsKey("data"))return false;
+          var entries=json["data"] as object[];
+          if(entries==null)return false;
+          foreach(var item in entries){
+            var row=item as Dictionary<string,object>;
+            if(row!=null&&row.ContainsKey("id")&&String.Equals(Convert.ToString(row["id"]),alias,StringComparison.Ordinal))return true;
+          }
+          return false;
+        }
+      }catch{return false;}
+   }
    public static UnitStatus Check(Unit unit,HubConfig c){
      var u=new UnitStatus();int pid=Listener(unit.Port);
      if(pid>0){
        u.Pid=pid;
        if(!Owned(pid,unit,c)){u.State="FOREIGN";u.Detail="端口被其他程序/配置占用，禁止停止";return u;}
-       u.State=IsHealthy(unit.Port)?"READY":"LOADING";
+       u.State=IsHealthy(unit.Port)&&(unit.Role!="Query"||HasChatModel(unit.Port,unit.Alias))?"READY":"LOADING";
+       if(unit.Role=="Query"&&u.State=="LOADING")u.Detail="等待 /health 与 /v1/models";
      }else{
        u.Pid=OurPid(unit,c);
        u.State=u.Pid>0?"LOADING":"STOPPED";
@@ -258,11 +279,13 @@ namespace LocalRagHub {
        Directory.CreateDirectory(Paths.LogDir);
        string modelLog=Path.Combine(Paths.LogDir,unit.Role.ToLowerInvariant()+"-server.log");
        var args=new StringBuilder();
-       args.Append("-m ").Append(Quote(unit.File)).Append(" --embedding ");
-       args.Append(unit.Role=="Embedding"?("--pooling "+c.EmbeddingPooling+" "):"--reranking --pooling rank ");
+       args.Append("-m ").Append(Quote(unit.File)).Append(" ");
+       if(unit.Role=="Embedding")args.Append("--embedding --pooling ").Append(c.EmbeddingPooling).Append(" ");
+       else if(unit.Role=="Reranker")args.Append("--embedding --reranking --pooling rank ");
+       else args.Append("--jinja ");
        args.Append("--host 127.0.0.1 --port ").Append(unit.Port);
-       args.Append(" -c ").Append(c.Context).Append(" -np ").Append(unit.Parallel);
-       args.Append(" -ngl ").Append(c.GpuLayers).Append(" -kvu --no-webui ");
+       args.Append(" -c ").Append(unit.Role=="Query"?c.QueryContext:c.Context).Append(" -np ").Append(unit.Parallel);
+       args.Append(" -ngl ").Append(unit.Role=="Query"?c.QueryGpuLayers:c.GpuLayers).Append(" -kvu --no-webui ");
        args.Append("--alias ").Append(Quote(unit.Alias));
        args.Append(" --log-file ").Append(Quote(modelLog));
        args.Append(" --log-verbosity 3");
