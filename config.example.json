@@ -10,5 +10,13 @@
   "Context": 16384,
   "EmbeddingParallel": 4,
   "RerankerParallel": 8,
-  "GpuLayers": 99
+  "GpuLayers": 99,
+  "QueryEnabled": false,
+  "QueryDisableThinking": true,
+  "QueryPath": "models\\query\\Qwen_Qwen3.5-9B-Q5_K_M.gguf",
+  "QueryId": "Qwen3.5-9B",
+  "QueryPort": 11437,
+  "QueryContext": 8192,
+  "QueryParallel": 1,
+  "QueryGpuLayers": 99
 }
