@@ -151,7 +151,8 @@ namespace LocalRagHub {
     bool fresh;using(var mutex=new Mutex(true,@"Local\LocalRagHubSingleInstance_V03",out fresh)){
       if(!fresh){MessageBox.Show("本地检索服务台已经打开。","Local RAG Hub");return;}
        Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-       Application.Run(new MainWindow());
+       try{Application.Run(new MainWindow());}
+       finally{ModelProcessOwner.Release();}
      }
    }
    // Headless self-test: MUST NOT create any window, form, timer or dialog.
@@ -256,7 +257,7 @@ namespace LocalRagHub {
          && String.Equals(modelAlias,unit.Alias,StringComparison.Ordinal);
      }catch{return false;}
    }
-   static bool Owned(int pid,Unit unit,HubConfig c){
+    internal static bool Owned(int pid,Unit unit,HubConfig c){
      if(pid<=0)return false;
      try {
        using(var search=new ManagementObjectSearcher("SELECT ExecutablePath,CommandLine FROM Win32_Process WHERE ProcessId="+pid)){
@@ -349,8 +350,14 @@ namespace LocalRagHub {
          WorkingDirectory=Path.GetDirectoryName(Paths.Resolve(c.ServerPath)),UseShellExecute=false,CreateNoWindow=true
        };
        if(cancelled!=null&&cancelled())throw new OperationCanceledException(unit.Role+" 启动已取消");
-       var proc=Process.Start(psi);
-       lock(launchedLock)launchedPids.Add(proc.Id);
+        var proc=Process.Start(psi);
+       try{
+         ModelProcessOwner.Track(proc,unit,c);
+         lock(launchedLock)launchedPids.Add(proc.Id);
+       }catch(Exception ex){
+         try{if(!proc.HasExited){proc.Kill();proc.WaitForExit(3000);}}catch{}
+         throw new InvalidOperationException("无法建立退出保护；为避免后台残留，已中止模型启动："+ex.Message,ex);
+       }
        Logger.Write("["+unit.Role+"] 启动请求 PID "+proc.Id+" 端口 "+unit.Port);
      }
      for(int n=0;n<180;n++){
@@ -371,6 +378,7 @@ namespace LocalRagHub {
      if(!Owned(state.Pid,unit,c))throw new Exception(unit.Role+" 进程归属校验失败，不允许结束");
      var proc=Process.GetProcessById(state.Pid);proc.Kill();if(!proc.WaitForExit(5000))throw new TimeoutException(unit.Role+" 停止超时，PID="+state.Pid);
      lock(launchedLock)launchedPids.Remove(state.Pid);
+     ModelProcessOwner.Remove(state.Pid);
      Logger.Write("["+unit.Role+"] 关闭 PID "+state.Pid);
      return unit.Role+" 已停止 PID "+state.Pid;
    }
@@ -650,12 +658,11 @@ namespace LocalRagHub {
          }
        }catch(AggregateException ex){Logger.Write("[shutdown] operation "+ex.GetBaseException().Message);}
        try{
-         foreach(var unit in Paths.Units(snapshot)){
-           try{
-             string msg=Backend.StopLaunched(unit,snapshot);Logger.Write("[shutdown] "+msg);
-           }catch(Exception ex){errors.Add(unit.Role+"："+ex.Message);}
-         }
-         if(Backend.LiveLaunchedPids().Length>0)errors.Add("仍存在本次启动的模型进程 PID："+String.Join(",",Backend.LiveLaunchedPids().Select(p=>p.ToString()).ToArray()));
+         errors.AddRange(ModelProcessOwner.StopVerified());
+         var remaining=ModelProcessOwner.LivePids();
+         if(remaining.Length>0)errors.Add("仍有本产品登记的模型 PID："+String.Join(",",remaining.Select(p=>p.ToString()).ToArray()));
+         var untracked=ModelProcessOwner.Untracked(snapshot);
+         if(untracked.Length>0)errors.Add("发现来源无法验证的模型，不会误杀其他软件，请先检查："+String.Join(", ",untracked));
        }catch(Exception ex){errors.Add("清理失败："+ex.Message);}
        try{if(!IsDisposed)BeginInvoke((Action)(()=>{
          if(errors.Count>0){
@@ -666,7 +673,8 @@ namespace LocalRagHub {
            MessageBox.Show(this,String.Join("\r\n",errors.ToArray()),"关闭检查未通过，尚未退出",MessageBoxButtons.OK,MessageBoxIcon.Warning);
            clock.Start();return;
          }
-         closeFinished=true;
+          ModelProcessOwner.Release();
+          closeFinished=true;
          Close();
        }));}catch(Exception ex){Logger.Write("[shutdown] UI finalise "+ex.Message);}
      });
