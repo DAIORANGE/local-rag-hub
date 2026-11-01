@@ -190,6 +190,23 @@ namespace LocalRagHub {
 
 namespace LocalRagHub {
  public static class Backend {
+   // Track exact PIDs launched by this GUI instance; closing must not kill foreign
+   // llama-server processes, even if they happen to use identical model arguments.
+   static readonly object launchedLock=new object();
+   static readonly HashSet<int> launchedPids=new HashSet<int>();
+   public static int[] LaunchedPids(){lock(launchedLock)return launchedPids.ToArray();}
+   public static int[] LiveLaunchedPids(){
+     return LaunchedPids().Where(pid=>{try{return !Process.GetProcessById(pid).HasExited;}catch{return false;}}).ToArray();
+   }
+   public static string StopLaunched(Unit unit,HubConfig config){
+     var pids=LaunchedPids();
+     if(pids.Length==0)return unit.Role+"：本次启动器未启动模型";
+     UnitStatus state=Check(unit,config);
+     if(state.Pid<=0 || !pids.Contains(state.Pid))return unit.Role+"：本次未启动该服务（未触碰其他程序）";
+     var result=Stop(unit,config);
+     lock(launchedLock)launchedPids.Remove(state.Pid);
+     return result;
+   }
    static string Run(string exe,string args,int ms){
      using(var p=new Process()){
        var sb=new StringBuilder();
@@ -304,7 +321,8 @@ namespace LocalRagHub {
      return u;
    }
    static string Quote(string v){return "\""+v.Replace("\"","\\\"")+"\"";}
-   public static string Start(Unit unit,HubConfig c){
+   public static string Start(Unit unit,HubConfig c,Func<bool> cancelled=null){
+     if(cancelled!=null&&cancelled())throw new OperationCanceledException(unit.Role+" 启动已取消");
      UnitStatus start=Check(unit,c);
      if(start.State=="READY")return unit.Role+" 已在运行 (PID "+start.Pid+")";
      if(start.State=="FOREIGN")throw new Exception(unit.Role+" 的端口 "+unit.Port+" 已被其他进程/不同配置使用");
@@ -330,11 +348,15 @@ namespace LocalRagHub {
        var psi=new ProcessStartInfo(Paths.Resolve(c.ServerPath),args.ToString()){
          WorkingDirectory=Path.GetDirectoryName(Paths.Resolve(c.ServerPath)),UseShellExecute=false,CreateNoWindow=true
        };
+       if(cancelled!=null&&cancelled())throw new OperationCanceledException(unit.Role+" 启动已取消");
        var proc=Process.Start(psi);
+       lock(launchedLock)launchedPids.Add(proc.Id);
        Logger.Write("["+unit.Role+"] 启动请求 PID "+proc.Id+" 端口 "+unit.Port);
      }
      for(int n=0;n<180;n++){
+       if(cancelled!=null&&cancelled())throw new OperationCanceledException(unit.Role+" 启动已取消，退出前清理本次启动的进程");
        Thread.Sleep(500);
+       if(cancelled!=null&&cancelled())throw new OperationCanceledException(unit.Role+" 启动已取消，退出前清理本次启动的进程");
        UnitStatus s=Check(unit,c);
        if(s.State=="READY")return unit.Role+" READY  PID "+s.Pid;
        if(s.State=="FOREIGN")throw new Exception(unit.Role+" 端口归属异常："+s.Detail);
@@ -347,7 +369,8 @@ namespace LocalRagHub {
      if(state.State=="FOREIGN")return unit.Role+"：非本应用进程，未触碰";
      if(state.Pid<=0)return unit.Role+" 已停止";
      if(!Owned(state.Pid,unit,c))throw new Exception(unit.Role+" 进程归属校验失败，不允许结束");
-     var proc=Process.GetProcessById(state.Pid);proc.Kill();proc.WaitForExit(5000);
+     var proc=Process.GetProcessById(state.Pid);proc.Kill();if(!proc.WaitForExit(5000))throw new TimeoutException(unit.Role+" 停止超时，PID="+state.Pid);
+     lock(launchedLock)launchedPids.Remove(state.Pid);
      Logger.Write("["+unit.Role+"] 关闭 PID "+state.Pid);
      return unit.Role+" 已停止 PID "+state.Pid;
    }
@@ -377,6 +400,19 @@ namespace LocalRagHub {
      p.AddArc(r.Right-d,r.Top,d,d,270,90);
      p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);
      p.AddArc(r.Left,r.Bottom-d,d,d,90,90);p.CloseFigure();return p;
+   }
+ }
+ public class StatusText:Control {
+   public StatusText(int x,int y,int w,int h){
+     Location=new Point(x,y);Size=new Size(w,h);
+     Font=Theme.Font(15,true);ForeColor=Theme.Green;BackColor=Theme.Card;
+     SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+   }
+   protected override void OnPaintBackground(PaintEventArgs e){e.Graphics.Clear(BackColor);}
+   protected override void OnPaint(PaintEventArgs e){
+     e.Graphics.Clear(BackColor);
+     TextRenderer.DrawText(e.Graphics,Text,Font,ClientRectangle,ForeColor,
+       TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPadding);
    }
  }
  public class Card:Panel {
@@ -557,11 +593,14 @@ namespace LocalRagHub {
     HubConfig cfg;UnitStatus[] current={new UnitStatus(),new UnitStatus(),new UnitStatus{State="DISABLED"}};
     bool configured=true;
    readonly Color W=Color.White;
-    Label allstatus,embstate,rerstate,querystate,embpid,rerpid,querypid,embtime,rertime,querytime,embport,rerport,queryport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
+    StatusText allstatus;
+    Label embstate,rerstate,querystate,embpid,rerpid,querypid,embtime,rertime,querytime,embport,rerport,queryport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
    Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,querySettings,viewlogs,models,captureButton,requestListButton;
    RequestMonitor requestMonitor;
     ActionButton embStart,embStop,rerStart,rerStop,queryStart,queryStop;
    System.Windows.Forms.Timer clock;int poll=0,working=0;
+   volatile bool closeRequested=false,closeFinished=false;
+   Task activeOperation,shutdownOperation;
    public MainWindow(){
       cfg=Paths.Read();
       Text="Local RAG Hub · 本地检索服务台";
@@ -585,16 +624,52 @@ namespace LocalRagHub {
         if(freshRun&&!configured){try{BeginInvoke((Action)(()=>OpenSettings()));}catch{}}
       };
       FormClosing+=(s,e)=>{
-        if(requestMonitor!=null&&requestMonitor.Running){
-          var ans=MessageBox.Show(this,"关闭面板会停止 12435/12436/12437 的请求转发。使用监控入口的插件随后会连接失败。确定关闭？","请求记录仍在运行",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);
-          if(ans!=DialogResult.Yes){e.Cancel=true;return;}
-          requestMonitor.Stop();
-        }
-        if(Interlocked.CompareExchange(ref working,0,0)>0){
-          MessageBox.Show(this,"模型操作仍在执行中，操作完成后再关闭启动器。","请稍候");
-          e.Cancel=true;
-        }else{clock.Stop();}
+        if(closeFinished){clock.Stop();if(requestMonitor!=null)requestMonitor.Dispose();return;}
+        // The X means a full shutdown. Do not hide, minimise to tray or abandon workers.
+        e.Cancel=true;
+        if(closeRequested)return;
+        BeginFullShutdown();
       };
+   }
+   void BeginFullShutdown(){
+     closeRequested=true;
+     clock.Stop();
+     try{if(requestMonitor!=null)requestMonitor.Dispose();}catch(Exception ex){Logger.Write("[shutdown] relay "+ex.Message);}
+     captureButton.Enabled=false;requestListButton.Enabled=false;
+     ToggleActions(true);
+     go.Text="正在关闭：停止本机模型服务...";
+     allstatus.Text="正在完全退出，清理模型进程...";
+     allstatus.ForeColor=Theme.Yellow;allstatus.Invalidate();
+     var op=activeOperation;
+     var snapshot=Paths.Clone(cfg);
+     shutdownOperation=Task.Run(()=>{
+       var errors=new List<string>();
+       try{
+         if(op!=null && !op.IsCompleted && !op.Wait(25000)){
+           errors.Add("正在进行的模型操作未在规定时间内结束");
+         }
+       }catch(AggregateException ex){Logger.Write("[shutdown] operation "+ex.GetBaseException().Message);}
+       try{
+         foreach(var unit in Paths.Units(snapshot)){
+           try{
+             string msg=Backend.StopLaunched(unit,snapshot);Logger.Write("[shutdown] "+msg);
+           }catch(Exception ex){errors.Add(unit.Role+"："+ex.Message);}
+         }
+         if(Backend.LiveLaunchedPids().Length>0)errors.Add("仍存在本次启动的模型进程 PID："+String.Join(",",Backend.LiveLaunchedPids().Select(p=>p.ToString()).ToArray()));
+       }catch(Exception ex){errors.Add("清理失败："+ex.Message);}
+       try{if(!IsDisposed)BeginInvoke((Action)(()=>{
+         if(errors.Count>0){
+           closeRequested=false;
+           allstatus.Text="关闭未完成，请检查模型进程";allstatus.ForeColor=Theme.Red;allstatus.Invalidate();
+           ToggleActions(false);
+           // Do not silently claim a complete exit while this launcher still owns live models.
+           MessageBox.Show(this,String.Join("\r\n",errors.ToArray()),"关闭检查未通过，尚未退出",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+           clock.Start();return;
+         }
+         closeFinished=true;
+         Close();
+       }));}catch(Exception ex){Logger.Write("[shutdown] UI finalise "+ex.Message);}
+     });
    }
    Card CardAt(int x,int y,int w,int h){var card=new Card(x,y,w,h);Controls.Add(card);return card;}
    ActionButton ButtonOn(Control par,string text,int x,int y,int w,int h,bool primary=false){
@@ -610,7 +685,7 @@ namespace LocalRagHub {
        querySettings=ButtonOn(top,"◇ Query设置",947,18,140,38,false);
       var chip=new Card(682,67,535,85){Line=Theme.Green};top.Controls.Add(chip);
       Theme.Label(chip,"●  服务总状态",22,9,310,22,10,Theme.Muted);
-      allstatus=Theme.Label(chip,"正在检查...",22,42,488,28,15,Theme.Green,true);
+      allstatus=new StatusText(22,40,488,32){Text="正在检查..."};chip.Controls.Add(allstatus);
 
        var em=CardAt(23,204,400,220);em.Line=Theme.Cyan;
        var rr=CardAt(437,204,400,220);rr.Line=Theme.Cyan;
@@ -723,6 +798,7 @@ namespace LocalRagHub {
      try{BeginInvoke((Action)(()=>Log(record.Summary)));}catch{}
    }
    void ToggleRequestCapture(){
+     if(closeRequested)return;
      if(requestMonitor!=null&&requestMonitor.Running){
        requestMonitor.Stop();captureButton.Text="开启记录";
        Log("请求转发已停止；改用监控入口的插件现在不能连接。");return;
@@ -789,6 +865,7 @@ namespace LocalRagHub {
      go.Text=busy?"⌛  后台操作中，窗口仍可监控":"▶   启动 / 恢复服务";
    }
    void DoAction(string kind,string role=null){
+     if(closeRequested)return;
      if(!String.IsNullOrEmpty(Paths.ConfigReadError)){
        Log("配置文件无法解析：为避免按错误默认配置启动或停止服务，操作被拒绝。请备份并修复 config.json。");return;
      }
@@ -796,22 +873,24 @@ namespace LocalRagHub {
      ToggleActions(true);Log("开始："+kind+(role==null?"全部服务":role));
      var config=Paths.Clone(cfg);var units=Paths.Units(config).Where(u=>role==null||u.Role==role).ToArray();
       if(units.Length==0){Log("["+role+"] 未启用，先在 Query 设置中启用。");Interlocked.Exchange(ref working,0);ToggleActions(false);return;}
-     Task.Run(()=>{
+     activeOperation=Task.Run(()=>{
        foreach(var u in units){
+         if(closeRequested)break;
          try {
            if(kind=="停止")Log(Backend.Stop(u,config));
-           else if(kind=="重启"){Log(Backend.Stop(u,config));Log(Backend.Start(u,config));}
-           else Log(Backend.Start(u,config));
+           else if(kind=="重启"){Log(Backend.Stop(u,config));if(!closeRequested)Log(Backend.Start(u,config,()=>closeRequested));}
+           else Log(Backend.Start(u,config,()=>closeRequested));
          }catch(Exception ex){Log("["+u.Role+"] ERROR "+ex.Message);}
          RefreshStatus();
        }
      }).ContinueWith(t=>{
        Interlocked.Exchange(ref working,0);
        if(t.Exception!=null)Log("任务发生异常："+t.Exception.GetBaseException().Message);
-       try{if(!IsDisposed)BeginInvoke((Action)(()=>{ToggleActions(false);RefreshStatus();}));}catch{}
+       try{if(!IsDisposed && !closeRequested)BeginInvoke((Action)(()=>{ToggleActions(false);RefreshStatus();}));}catch{}
      });
    }
    void RefreshStatus(){
+     if(closeRequested)return;
      if(Interlocked.CompareExchange(ref poll,1,0)!=0)return;
      var config=Paths.Clone(cfg);
      Task.Run(()=>{
@@ -829,6 +908,7 @@ namespace LocalRagHub {
      });
    }
    void DrawData(UnitStatus[] statuses,string gpu){
+     if(closeRequested)return;
      current=statuses;
      UpdateService(statuses[0],embstate,embpid,embport,embtime,cfg.EmbeddingPort);
      UpdateService(statuses[1],rerstate,rerpid,rerport,rertime,cfg.RerankerPort);
@@ -838,7 +918,8 @@ namespace LocalRagHub {
        bool foreign=statuses.Any(x=>x.State=="FOREIGN");
        allstatus.Text=foreign?"⚠  有端口被其他进程占用":all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":"○  服务已停止";
        allstatus.ForeColor=foreign?Theme.Red:all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
-       if(!configured){allstatus.Text=String.IsNullOrEmpty(Paths.ConfigReadError)?"⚠ 缺少模型/配置文件，请检查设置":"⚠ 配置文件损坏，已锁定服务操作";allstatus.ForeColor=Theme.Yellow;}
+       allstatus.Invalidate();
+       if(!configured){allstatus.Text=String.IsNullOrEmpty(Paths.ConfigReadError)?"⚠ 缺少模型/配置文件，请检查设置":"⚠ 配置文件损坏，已锁定服务操作";allstatus.ForeColor=Theme.Yellow;allstatus.Invalidate();}
      if(!String.IsNullOrEmpty(gpu)){
        var parts=gpu.Split('|');
        if(parts.Length>=7){
