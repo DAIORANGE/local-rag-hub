@@ -715,6 +715,7 @@ namespace LocalRagHub {
        bool all=a&&b&&q,any=a||b||(cfg.QueryEnabled&&statuses[2].State=="READY");
        allstatus.Text=all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":statuses.Any(x=>x.State=="FOREIGN")?"⚠  端口已被其他进程占用":"○  服务已停止";
        allstatus.ForeColor=all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
+       if(!configured){allstatus.Text="⚠ 尚未完成配置：请在「设置」中核对所需 GGUF（Query 为可选服务）";allstatus.ForeColor=Theme.Yellow;}
      if(!String.IsNullOrEmpty(gpu)){
        var parts=gpu.Split('|');
        if(parts.Length>=7){
