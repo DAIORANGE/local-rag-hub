@@ -556,7 +556,8 @@ namespace LocalRagHub {
     bool configured=true;
    readonly Color W=Color.White;
     Label allstatus,embstate,rerstate,querystate,embpid,rerpid,querypid,embtime,rertime,querytime,embport,rerport,queryport,gpuname,vramnumbers,freemem,gpuusage,temperature,power,refresh;
-   Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,querySettings,viewlogs,models;
+   Bar memBar,utilBar;RichTextBox logView;ActionButton go,stop,restart,copy,settings,querySettings,viewlogs,models,captureButton,requestListButton;
+   RequestMonitor requestMonitor;
     ActionButton embStart,embStop,rerStart,rerStop,queryStart,queryStop;
    System.Windows.Forms.Timer clock;int poll=0,working=0;
    public MainWindow(){
@@ -582,6 +583,11 @@ namespace LocalRagHub {
         if(freshRun&&!configured){try{BeginInvoke((Action)(()=>OpenSettings()));}catch{}}
       };
       FormClosing+=(s,e)=>{
+        if(requestMonitor!=null&&requestMonitor.Running){
+          var ans=MessageBox.Show(this,"关闭面板会停止 12435/12436/12437 的请求转发。使用监控入口的插件随后会连接失败。确定关闭？","请求记录仍在运行",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);
+          if(ans!=DialogResult.Yes){e.Cancel=true;return;}
+          requestMonitor.Stop();
+        }
         if(Interlocked.CompareExchange(ref working,0,0)>0){
           MessageBox.Show(this,"模型操作仍在执行中，操作完成后再关闭启动器。","请稍候");
           e.Cancel=true;
@@ -640,12 +646,24 @@ namespace LocalRagHub {
       power=Theme.Label(gpu,"—",1083,100,135,40,16,W,true);
 
       var logcard=CardAt(23,638,749,251);
-      Theme.Label(logcard,"▤  运行日志",19,12,412,36,16,W,true);
+       Theme.Label(logcard,"▤  运行日志",19,12,340,36,16,W,true);
+       requestListButton=ButtonOn(logcard,"请求列表",423,9,120,35);
+       captureButton=ButtonOn(logcard,"开启记录",553,9,177,35);
       var area=new Card(14,51,721,184){Line=Theme.Edge,BackColor=Color.FromArgb(9,23,33)};
       logcard.Controls.Add(area);
       logView=new RichTextBox{Location=new Point(11,9),Size=new Size(699,165),BackColor=Color.FromArgb(9,23,33),
         ForeColor=Theme.Muted,Font=new Font("Consolas",10),BorderStyle=BorderStyle.None,ReadOnly=true,WordWrap=false,DetectUrls=false};
       area.Controls.Add(logView);
+       logView.MouseDoubleClick+=(source,args)=>{
+         int idx=logView.GetLineFromCharIndex(logView.GetCharIndexFromPosition(args.Location));
+         var linesOfLog=logView.Lines;
+         if(idx<0||idx>=linesOfLog.Length)return;
+         var tag=Regex.Match(linesOfLog[idx],@"\[REQ #(\d+)\]");int id;
+         if(tag.Success&&int.TryParse(tag.Groups[1].Value,out id)&&requestMonitor!=null){
+           var record=requestMonitor.Find(id);
+           if(record!=null)using(var dlg=new RequestDetailDialog(record))dlg.ShowDialog(this);
+         }
+       };
       var action=CardAt(791,638,475,251);
       Theme.Label(action,"▷  服务控制",20,12,429,36,16,W,true);
       go=ButtonOn(action,"▶   启动 / 恢复服务",17,51,438,56,true);
@@ -659,6 +677,8 @@ namespace LocalRagHub {
       refresh=Theme.Label(this,"正在连接...",1054,907,216,28,9,Theme.Cyan);
 
       settings.Click+=(s,e)=>OpenSettings();
+       captureButton.Click+=(s,e)=>ToggleRequestCapture();
+       requestListButton.Click+=(s,e)=>ShowRequestList();
        querySettings.Click+=(s,e)=>OpenQuerySettings();
        embStart.Click+=(s,e)=>DoAction("启动","Embedding");
        embStop.Click+=(s,e)=>DoAction("停止","Embedding");
@@ -696,11 +716,35 @@ namespace LocalRagHub {
      if(InvokeRequired){try{BeginInvoke((Action)(()=>AppendLog(msg)));}catch{}}
      else AppendLog(msg);
    }
+   void OnRequestReceived(RequestRecord record){
+     if(IsDisposed)return;
+     try{BeginInvoke((Action)(()=>Log(record.Summary)));}catch{}
+   }
+   void ToggleRequestCapture(){
+     if(requestMonitor!=null&&requestMonitor.Running){
+       requestMonitor.Stop();captureButton.Text="开启记录";
+       Log("请求转发已停止；改用监控入口的插件现在不能连接。");return;
+     }
+     try{
+       requestMonitor=new RequestMonitor(cfg,OnRequestReceived);
+       requestMonitor.Start();captureButton.Text="停止记录";
+       Log("监控入口：Embedding=12435、Reranker=12436、Query=12437（仅 127.0.0.1）。");
+       Log("只有使用 /src/插件标签/v1 的请求才能记录来源；直连原端口无法识别插件。");
+     }catch(Exception ex){
+       if(requestMonitor!=null)requestMonitor.Dispose();requestMonitor=null;
+       MessageBox.Show(this,ex.Message,"请求记录启动失败",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+     }
+   }
+   void ShowRequestList(){
+     if(requestMonitor==null){MessageBox.Show(this,"请先开启请求记录。请让插件使用监控地址，否则无法显示来源。");return;}
+     using(var d=new RequestListDialog(requestMonitor))d.ShowDialog(this);
+   }
    void OpenFolder(string folder){
      try{if(!Directory.Exists(folder))throw new DirectoryNotFoundException(folder);Process.Start("explorer.exe","\""+folder+"\"");}
      catch(Exception ex){MessageBox.Show(this,ex.Message,"无法打开目录");}
    }
    void OpenSettings(){
+     if(requestMonitor!=null&&requestMonitor.Running){MessageBox.Show(this,"请先停止请求记录，再修改模型服务配置。");return;}
      if(Interlocked.CompareExchange(ref working,0,0)>0){MessageBox.Show(this,"先完成当前操作再编辑设置。");return;}
      if(current.Any(x=>x.State=="READY"||x.State=="LOADING")){
        MessageBox.Show(this,"当前仍有模型在运行。为避免新旧模型路径/端口混淆，请先点击「停止服务」，再保存新配置。","先停止模型",MessageBoxButtons.OK,MessageBoxIcon.Information);
@@ -715,6 +759,7 @@ namespace LocalRagHub {
       }
    }
    void OpenQuerySettings(){
+     if(requestMonitor!=null&&requestMonitor.Running){MessageBox.Show(this,"请先停止请求记录，再修改 Query 设置。");return;}
       if(Interlocked.CompareExchange(ref working,0,0)>0){MessageBox.Show(this,"先完成当前服务操作。");return;}
       if(current.Length>2 && (current[2].State=="READY"||current[2].State=="LOADING")){
         MessageBox.Show(this,"先停止 Query 服务即可更改它的模型；Embedding/Reranker 无需停止。","仅需停止 Query");return;
