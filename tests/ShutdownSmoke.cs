@@ -25,11 +25,13 @@ class ShutdownSmoke {
    string stage=Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory);
    string server=Path.GetFullPath(cfg.ServerPath??"");
    // Fail closed if launched from the desktop installation or against actual GGUFs.
-   if(!String.Equals(Path.GetDirectoryName(server)?.TrimEnd('\\'),stage.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)
+   string serverDir=Path.GetDirectoryName(server);
+   string embeddingName=Path.GetFileName(cfg.EmbeddingPath==null?"":cfg.EmbeddingPath);
+   if(serverDir==null || !String.Equals(serverDir.TrimEnd('\\'),stage.TrimEnd('\\'),StringComparison.OrdinalIgnoreCase)
       || !String.Equals(Path.GetFileName(server),"llama-server.exe",StringComparison.OrdinalIgnoreCase)
       || !cfg.EmbeddingId.StartsWith("Fake-Embedding",StringComparison.Ordinal)
       || cfg.EmbeddingPort!=15435 || cfg.RerankerPort!=15436 || cfg.QueryEnabled
-      || !Path.GetFileName(cfg.EmbeddingPath??"").Equals("fake-embedding.gguf",StringComparison.OrdinalIgnoreCase))
+      || !String.Equals(embeddingName,"fake-embedding.gguf",StringComparison.OrdinalIgnoreCase))
      throw new InvalidOperationException("REFUSE_NON_SYNTHETIC_TEST_CONFIGURATION");
    var units=Paths.Units(cfg);
    if(units.Length!=2)throw new Exception("Expected two synthetic units");
