@@ -775,8 +775,12 @@ namespace LocalRagHub {
    void LoadHistory(){
      try {
        if(File.Exists(Paths.UiLog)){
-          var lines=File.ReadLines(Paths.UiLog,Encoding.UTF8).Reverse().Take(25).Reverse();
-          foreach(string row in lines)AppendLog(row);
+          var lines=File.ReadLines(Paths.UiLog,Encoding.UTF8).Reverse().Take(25).Reverse().ToArray();
+          if(lines.Length>0){
+            AppendLog("──────── 以下为历史日志，不代表当前服务状态 ────────");
+            foreach(string row in lines)AppendLog(row);
+            AppendLog("──────── 本次会话开始，以下为当前状态 ────────");
+          }
        }
      }catch{}
    }
