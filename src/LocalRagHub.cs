@@ -411,8 +411,8 @@ namespace LocalRagHub {
    protected override void OnPaintBackground(PaintEventArgs e){e.Graphics.Clear(BackColor);}
    protected override void OnPaint(PaintEventArgs e){
      e.Graphics.Clear(BackColor);
-     TextRenderer.DrawText(e.Graphics,Text,Font,ClientRectangle,ForeColor,
-       TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPadding);
+     TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(8,0,Math.Max(0,Width-16),Height),ForeColor,
+       TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
    }
  }
  public class Card:Panel {
@@ -685,7 +685,7 @@ namespace LocalRagHub {
        querySettings=ButtonOn(top,"◇ Query设置",947,18,140,38,false);
       var chip=new Card(682,67,535,85){Line=Theme.Green};top.Controls.Add(chip);
       Theme.Label(chip,"●  服务总状态",22,9,310,22,10,Theme.Muted);
-      allstatus=new StatusText(22,40,488,32){Text="正在检查..."};chip.Controls.Add(allstatus);
+      allstatus=new StatusText(22,39,488,34){Text="CHECKING · 正在检查"};chip.Controls.Add(allstatus);
 
        var em=CardAt(23,204,400,220);em.Line=Theme.Cyan;
        var rr=CardAt(437,204,400,220);rr.Line=Theme.Cyan;
@@ -729,7 +729,7 @@ namespace LocalRagHub {
       var area=new Card(14,51,721,184){Line=Theme.Edge,BackColor=Color.FromArgb(9,23,33)};
       logcard.Controls.Add(area);
       logView=new RichTextBox{Location=new Point(11,9),Size=new Size(699,165),BackColor=Color.FromArgb(9,23,33),
-        ForeColor=Theme.Muted,Font=new Font("Consolas",10),BorderStyle=BorderStyle.None,ReadOnly=true,WordWrap=false,DetectUrls=false};
+        ForeColor=Theme.Muted,Font=new Font("Consolas",10),BorderStyle=BorderStyle.None,ReadOnly=true,WordWrap=true,ScrollBars=RichTextBoxScrollBars.Vertical,DetectUrls=false};
       area.Controls.Add(logView);
        logView.MouseDoubleClick+=(source,args)=>{
          int idx=logView.GetLineFromCharIndex(logView.GetCharIndexFromPosition(args.Location));
@@ -920,7 +920,7 @@ namespace LocalRagHub {
        bool a=statuses[0].State=="READY",b=statuses[1].State=="READY",q=!cfg.QueryEnabled||statuses[2].State=="READY";
        bool all=a&&b&&q,any=a||b||(cfg.QueryEnabled&&statuses[2].State=="READY");
        bool foreign=statuses.Any(x=>x.State=="FOREIGN");
-       allstatus.Text=foreign?"⚠  有端口被其他进程占用":all?"✔  运行正常 · "+(cfg.QueryEnabled?3:2)+"个服务 READY":any?"◐  部分运行 · 可点击恢复":statuses.Any(x=>x.State=="LOADING")?"◌  模型正在加载":"○  服务已停止";
+       allstatus.Text=foreign?"WARNING · 端口被其他程序占用":all?"READY · "+(cfg.QueryEnabled?3:2)+" 个模型服务正常":any?"PARTIAL · 部分模型运行中":statuses.Any(x=>x.State=="LOADING")?"LOADING · 模型正在加载":"STOPPED · 模型服务已停止";
        allstatus.ForeColor=foreign?Theme.Red:all?Theme.Green:(any?Theme.Yellow:Theme.Muted);
        allstatus.Invalidate();
        if(!configured){allstatus.Text=String.IsNullOrEmpty(Paths.ConfigReadError)?"⚠ 缺少模型/配置文件，请检查设置":"⚠ 配置文件损坏，已锁定服务操作";allstatus.ForeColor=Theme.Yellow;allstatus.Invalidate();}
