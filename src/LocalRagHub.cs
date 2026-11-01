@@ -17,6 +17,9 @@ using System.Web.Script.Serialization;
 namespace LocalRagHub {
  public class HubConfig {
    public string ServerPath="", EmbeddingPath="", RerankerPath="", EmbeddingId="Qwen3-Embedding-8B", RerankerId="Qwen3-Reranker-8B", EmbeddingPooling="last";
+   public bool QueryEnabled=false;
+   public string QueryPath="", QueryId="Qwen3-4B-Instruct-2507";
+   public int QueryPort=11437, QueryContext=8192, QueryParallel=1, QueryGpuLayers=0;
    public int EmbeddingPort=11435, RerankerPort=11436, Context=16384, EmbeddingParallel=4, RerankerParallel=8, GpuLayers=99;
  }
  public class Unit {
@@ -45,6 +48,7 @@ namespace LocalRagHub {
       d.ServerPath=Pick(Path.Combine(AppDir,@"llama.cpp\llama-server.exe"),Path.Combine(root,@"llama.cpp\llama-server.exe"));
       d.EmbeddingPath=Pick(Path.Combine(AppDir,@"models\embedding\Qwen3-Embedding-8B-Q4_K_M.gguf"),Path.Combine(root,@"models\embedding\Qwen3-Embedding-8B-Q4_K_M.gguf"));
       d.RerankerPath=Pick(Path.Combine(AppDir,@"models\reranker\Qwen3-Reranker-8B-Q4_K_M.gguf"),Path.Combine(root,@"models\reranker\Qwen3-Reranker-8B-Q4_K_M.gguf"));
+      d.QueryPath=Pick(Path.Combine(AppDir,@"models\query\Qwen3-4B-Instruct-2507-Q4_K_M.gguf"),Path.Combine(root,@"models\query\Qwen3-4B-Instruct-2507-Q4_K_M.gguf"));
       return d;
    }
    public static List<string> Missing(HubConfig c){
@@ -52,6 +56,7 @@ namespace LocalRagHub {
       if(String.IsNullOrWhiteSpace(c.ServerPath)||!File.Exists(Resolve(c.ServerPath)))m.Add("llama-server.exe");
       if(String.IsNullOrWhiteSpace(c.EmbeddingPath)||!File.Exists(Resolve(c.EmbeddingPath)))m.Add("Embedding 权重");
       if(String.IsNullOrWhiteSpace(c.RerankerPath)||!File.Exists(Resolve(c.RerankerPath)))m.Add("Reranker 权重");
+      if(c.QueryEnabled && (String.IsNullOrWhiteSpace(c.QueryPath)||!File.Exists(Resolve(c.QueryPath))))m.Add("Query 权重");
       return m;
    }
    public static HubConfig Read(){
@@ -81,11 +86,20 @@ namespace LocalRagHub {
      if(c.Context<512||c.Context>131072||c.GpuLayers<0||c.GpuLayers>999||c.EmbeddingParallel<1||c.EmbeddingParallel>32||c.RerankerParallel<1||c.RerankerParallel>32)throw new Exception("上下文/并发/GPU层数超出允许范围");
      if(String.IsNullOrWhiteSpace(c.EmbeddingId)||String.IsNullOrWhiteSpace(c.RerankerId))throw new Exception("模型 ID 不能为空");
      if(new[]{"last","mean","cls","none"}.All(x=>x!=c.EmbeddingPooling))throw new Exception("Embedding pooling 只能是 last / mean / cls / none");
+      if(c.QueryEnabled){
+        if(c.QueryPort<1024||c.QueryPort>65535||c.QueryPort==c.EmbeddingPort||c.QueryPort==c.RerankerPort)throw new Exception("Query 端口无效或与已有服务冲突");
+        if(String.IsNullOrWhiteSpace(c.QueryPath)||!File.Exists(Resolve(c.QueryPath)))throw new Exception("找不到 Query Chat GGUF："+Resolve(c.QueryPath));
+        if(String.IsNullOrWhiteSpace(c.QueryId))throw new Exception("Query 模型 ID 不能为空");
+        if(c.QueryContext<512||c.QueryContext>131072||c.QueryParallel<1||c.QueryParallel>32||c.QueryGpuLayers<0||c.QueryGpuLayers>999)throw new Exception("Query 运行参数越界");
+      }
    }
-   public static Unit[] Units(HubConfig c){return new[]{
-     new Unit("Embedding",Resolve(c.EmbeddingPath),c.EmbeddingId,c.EmbeddingPort,c.EmbeddingParallel),
-     new Unit("Reranker",Resolve(c.RerankerPath),c.RerankerId,c.RerankerPort,c.RerankerParallel)
-   };}
+   public static Unit[] Units(HubConfig c){
+      var list=new List<Unit>{
+        new Unit("Embedding",Resolve(c.EmbeddingPath),c.EmbeddingId,c.EmbeddingPort,c.EmbeddingParallel),
+        new Unit("Reranker",Resolve(c.RerankerPath),c.RerankerId,c.RerankerPort,c.RerankerParallel)};
+      if(c.QueryEnabled)list.Add(new Unit("Query",Resolve(c.QueryPath),c.QueryId,c.QueryPort,c.QueryParallel));
+      return list.ToArray();
+   }
  }
  public static class Logger {
    static readonly object gate=new object();
@@ -145,6 +159,7 @@ namespace LocalRagHub {
        sb.AppendLine("llama-server: "+Paths.Resolve(c.ServerPath)+" ["+(File.Exists(Paths.Resolve(c.ServerPath))?"OK":"MISSING")+"]");
        sb.AppendLine("Embedding: "+c.EmbeddingId+" port="+c.EmbeddingPort+" pooling="+c.EmbeddingPooling+" ["+(File.Exists(Paths.Resolve(c.EmbeddingPath))?"OK":"MISSING")+"]");
        sb.AppendLine("Reranker: "+c.RerankerId+" port="+c.RerankerPort+" ["+(File.Exists(Paths.Resolve(c.RerankerPath))?"OK":"MISSING")+"]");
+        sb.AppendLine("Query: "+(c.QueryEnabled?"ENABLED":"DISABLED")+" model="+c.QueryId+" port="+c.QueryPort+" ctx="+c.QueryContext+" ngl="+c.QueryGpuLayers);
        try{Paths.Validate(c);sb.AppendLine("ConfigValidation: PASS");}
        catch(Exception ve){sb.AppendLine("ConfigValidation: NOT-READY ("+ve.Message+")");}
        var miss=Paths.Missing(c);
